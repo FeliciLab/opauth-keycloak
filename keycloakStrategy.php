@@ -11,6 +11,8 @@
  * @license      MIT License
  */
 
+use \Firebase\JWT\JWT;
+
 /**
  * keycloak strategy for Opauth
  * based on https://developers.keycloak.com/accounts/docs/OAuth2
@@ -148,12 +150,11 @@ class keycloakStrategy extends OpauthStrategy
      */
     private function userinfo($access_token)
     {
-        //RECEBENDO O TOKEN E PASSANDO PARA SER DECODIFICADO
-        $userinfo = JWT::decode(
-            $access_token, 
-            null, 
-            array('RS256')
-        );
+        $exploded = array_map(function ($item) {
+            return json_decode(base64_decode($item));
+        }, explode('.', $access_token));
+
+        $userinfo = $exploded[1];
         
         if (!empty($userinfo)) {
             $encUserInfo = json_encode($userinfo);
