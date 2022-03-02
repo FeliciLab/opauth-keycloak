@@ -241,10 +241,6 @@ class OpauthKeyCloak extends \MapasCulturais\AuthProvider{
         $user->authProvider = $response['auth']['provider'];
         $user->authUid = $response['auth']['uid'];
         $user->email = $response['auth']['raw']['email'];
-
-        if (!empty($response['auth']['raw']['preferred_username'])) {
-            $user->cpf = $response['auth']['raw']['preferred_username'];
-        }
         $app->em->persist($user);
 
         // cria um agente do tipo user profile para o usuário criado acima
@@ -261,8 +257,8 @@ class OpauthKeyCloak extends \MapasCulturais\AuthProvider{
 
         $agent->emailPrivado = $user->email;
         
-        if (isset($user->cpf)) {
-            $agent->documento = $user->cpf;
+        if (!empty($response['auth']['raw']['preferred_username'])) {
+            $agent->documento = $response['auth']['raw']['preferred_username'];
         }
 
         $agent->save();
