@@ -9,6 +9,8 @@ class OpauthKeyCloak extends \MapasCulturais\AuthProvider{
 
     protected $_firstLloginUrl = null;
 
+    protected $baseUrl = '';
+
     protected function _init() {
         $app = App::i();
         
@@ -22,7 +24,9 @@ class OpauthKeyCloak extends \MapasCulturais\AuthProvider{
             'path' => preg_replace('#^https?\:\/\/[^\/]*(/.*)#', '$1', $url)
         ], $this->_config);
         
-        
+        preg_match('#(https?://[^/]+/)#',$config['auth_endpoint'], $matches);
+        $this->baseUrl = $matches[0];
+
          $opauth_config = [
             'strategy_dir' => PROTECTED_PATH . '/vendor/opauth/',
             'Strategy' => [
@@ -34,20 +38,6 @@ class OpauthKeyCloak extends \MapasCulturais\AuthProvider{
             'path' => $config['path'],
             'callback_url' => $app->createUrl('auth','response')
         ];
-        
-        
-        //  SaaS -- BEGIN
-        $app->hook('template(subsite.<<*>>.tabs):end', function() use($app){
-            if($app->user->is('saasAdmin') || $app->user->is('superSaasAdmin')) {
-                $this->part('singles/subsite--login-cidadao--tab');
-            }
-        });
-        
-        $app->hook('template(subsite.<<*>>.tabs-content):end', function() use($app){
-            if($app->user->is('saasAdmin') || $app->user->is('superSaasAdmin')) {
-                $this->part('singles/subsite--login-cidadao--content');
-            }
-        });
         
         $metadata = [
             'key_cloak__id' => ['label' => 'KeyCloak Client ID', 'private' => 'true'],
@@ -99,7 +89,7 @@ class OpauthKeyCloak extends \MapasCulturais\AuthProvider{
         
         if($config['logout_url']){
             $app->hook('auth.logout:after', function() use($app, $config){
-                $app->redirect($config['logout_url'] . '?next=' . $app->baseUrl);
+                $app->redirect($config['logout_url'] . '?redirect_uri=' . $app->baseUrl);
             });
         }
         
@@ -107,12 +97,32 @@ class OpauthKeyCloak extends \MapasCulturais\AuthProvider{
     public function _cleanUserSession() {
         unset($_SESSION['opauth']);
     }
+    
+    private function getUriHttpReferer()
+    {
+        $app = App::i();
+
+        if (isset($_SERVER['HTTP_REFERER'])) {
+            $caminho = $app->request()->cookies('mapasculturais_user_nav_url');
+            if (($_SERVER['HTTP_REFERER']==$app->createUrl('site', 'search')) && isset($caminho)) {
+                $path = $caminho;
+            } else {
+                $path = $_SERVER['HTTP_REFERER'];
+            }
+        } else {
+            $path = $app->auth->getRedirectPath();
+        }
+       
+        return $path;
+    }
+
     public function _requireAuthentication() {
         $app = App::i();
         if($app->request->isAjax()){
             $app->halt(401, \MapasCulturais\i::__('This action requires authentication'));
         }else{
-            $this->_setRedirectPath($app->request->getPathInfo());
+            $_SESSION['UriHttpReferer'] = $this->getUriHttpReferer();
+            $this->_setRedirectPath($this->getUriHttpReferer());
             $app->redirect($app->controller('auth')->createUrl(''), 401);
         }
     }
@@ -218,8 +228,8 @@ class OpauthKeyCloak extends \MapasCulturais\AuthProvider{
                 $response = $this->_getResponse();
                 $user = $this->createUser($response);
 
-                $profile = $user->profile;
-                $this->_setRedirectPath($this->onCreateRedirectUrl ? $this->onCreateRedirectUrl : $profile->editUrl);
+                
+                $this->lastRedirectPath();
             }
             $this->_setAuthenticatedUser($user);
             App::i()->applyHook('auth.successful');
@@ -231,7 +241,16 @@ class OpauthKeyCloak extends \MapasCulturais\AuthProvider{
         }
     }
 
+
+    //Método que pega a última URL antes de criar o login ou do usuário logar no mapa da saúde
+    public function lastRedirectPath(){
+        $path = $this->_setRedirectPath($_SESSION['UriHttpReferer']);
+        return $path;
+    }
+
     protected function _createUser($response) {
+        
+    
         $app = App::i();
 
         $app->disableAccessControl();
@@ -241,18 +260,29 @@ class OpauthKeyCloak extends \MapasCulturais\AuthProvider{
         $user->authProvider = $response['auth']['provider'];
         $user->authUid = $response['auth']['uid'];
         $user->email = $response['auth']['raw']['email'];
-        $app->em->persist($user);
+        
+        if (!empty($response['auth']['raw']['CPF'])) {
+            $user->cpf = $response['auth']['raw']['CPF'];
+        }
 
+        if (!empty($response['auth']['raw']['TELEFONE'])) {
+            $user->telefone = $response['auth']['raw']['TELEFONE'];
+        }
+        
+        $app->em->persist($user);
         // cria um agente do tipo user profile para o usuário criado acima
         $agent = new Entities\Agent($user);
-        $agent->status = 0;
+        $agent->status = 1;
 
         if(isset($response['auth']['raw']['name']) && isset($response['auth']['raw']['surname'])){
             $agent->name = $response['auth']['raw']['name'] . ' ' . $response['auth']['raw']['surname'];
+            $agent->nomeCompleto = $response['auth']['raw']['name'] . ' ' . $response['auth']['raw']['surname'];
         }else if(isset($response['auth']['raw']['name'])){
-            $agent->name = $response['auth']['raw']['name'];
+            $agent->name            = $response['auth']['raw']['name'];
+            $agent->nomeCompleto    = $response['auth']['raw']['name'];
         }else{
-            $agent->name = '';
+            $agent->name        = '';
+            $agent->nomeCompleto= '';
         }
 
         $agent->emailPrivado = $user->email;
@@ -273,5 +303,10 @@ class OpauthKeyCloak extends \MapasCulturais\AuthProvider{
         $this->_setRedirectPath($this->onCreateRedirectUrl ? $this->onCreateRedirectUrl : $agent->editUrl);
 
         return $user;
+        
+    }
+
+    function getChangePasswordUrl() {
+        return $this->baseUrl . 'auth/realms/saude/account/password';
     }
 }
